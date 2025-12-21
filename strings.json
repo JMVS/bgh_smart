@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure BGH Smart Control",
+        "description": "Set up your BGH air conditioner",
+        "data": {
+          "name": "Device name",
+          "host": "IP Address"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to device. Check IP and ensure AC is powered on.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}
