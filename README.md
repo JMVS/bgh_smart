@@ -1,5 +1,8 @@
 # BGH Smart Control - Home Assistant Integration
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=firtman&repository=bgh_smart&category=integration)
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+
 Integración personalizada para controlar aires acondicionados BGH Smart vía UDP (protocolo local) para Home Assistant.
 
 ## Características
@@ -31,6 +34,10 @@ NOTA: No se por el momento si funciona con el BGH Smart Control Kit (el pequeño
 ## Instalación
 
 ### Opción 1: HACS (Recomendado)
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=firtman&repository=bgh_smart&category=integration)
+
+O manualmente:
 
 1. Abre HACS en Home Assistant
 2. Ve a "Integraciones"
