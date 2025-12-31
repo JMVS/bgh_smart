@@ -1,6 +1,6 @@
 # BGH Smart Control - Home Assistant Integration
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=firtman&repository=bgh_smart&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=JMVS&repository=bgh_smart&category=integration)
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
 Integración personalizada para controlar aires acondicionados BGH Smart vía UDP (protocolo local) para Home Assistant.
@@ -26,16 +26,14 @@ Integración personalizada para controlar aires acondicionados BGH Smart vía UD
 ## Requisitos
 
 - Home Assistant 2023.1 o superior
-- Aire acondicionado BGH Smart con control IP/WiFi
+- Aire acondicionado BGH Smart con control IP/WiFi / BGH Smart Control Kit
 - IP fija configurada en tu router para cada equipo
-
-NOTA: No se por el momento si funciona con el BGH Smart Control Kit (el pequeño dispositivo smart que se conecta con aires acondicionados de cualquier marca). Esto está probado con los equipos BGH.
 
 ## Instalación
 
 ### Opción 1: HACS (Recomendado)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=firtman&repository=bgh_smart&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=JMVS&repository=bgh_smart&category=integration)
 
 O manualmente:
 
@@ -43,7 +41,7 @@ O manualmente:
 2. Ve a "Integraciones"
 3. Haz clic en los tres puntos (⋮) arriba a la derecha
 4. Selecciona "Repositorios personalizados"
-5. Agrega esta URL: `https://github.com/firtman/bgh_smart`
+5. Agrega esta URL: `https://github.com/JMVS/bgh_smart`
 6. Categoría: `Integration`
 7. Busca "BGH Smart Control" y descárgala
 8. Reinicia Home Assistant
@@ -87,7 +85,7 @@ Ejemplo:
 2. Haz clic en **+ AGREGAR INTEGRACIÓN**
 3. Busca "BGH Smart Control"
 4. Completa el formulario:
-   - **Nombre**: Nombre descriptivo (ej: "AAC Living")
+   - **Nombre**: Nombre descriptivo (ej: "AA Living")
    - **IP**: Dirección IP del equipo (ej: 192.168.2.169)
 5. Haz clic en **ENVIAR**
 
