@@ -291,134 +291,134 @@ class BGHClient:
                         continue
                         
                 except asyncio.TimeoutError:
-					broadcast_timeout += 1
-                
-                if broadcast_timeout == 1:
-                    _LOGGER.warning("No broadcasts received from %s", self.host)
-                    _LOGGER.info("Switching to polling mode...")
-                
-                _LOGGER.debug("Polling: Requesting status from %s", self.host)
-                await self.async_request_status()
-                await asyncio.sleep(2)
-                        
-        except asyncio.CancelledError:
-            _LOGGER.info("Broadcast listener stopped for %s", self.host)
-            break
-        except Exception as err:
-            _LOGGER.error("Error in broadcast listener: %s", err)
-            await asyncio.sleep(1)
+                    broadcast_timeout += 1
+                    
+                    if broadcast_timeout == 1:
+                        _LOGGER.warning("No broadcasts received from %s", self.host)
+                        _LOGGER.info("Switching to polling mode...")
+                    
+                    _LOGGER.debug("Polling: Requesting status from %s", self.host)
+                    await self.async_request_status()
+                    await asyncio.sleep(2)
+                            
+            except asyncio.CancelledError:
+                _LOGGER.info("Broadcast listener stopped for %s", self.host)
+                break
+            except Exception as err:
+                _LOGGER.error("Error in broadcast listener: %s", err)
+                await asyncio.sleep(1)
 
-async def async_request_status(self) -> None:
-    """Request status update (triggers a broadcast from the AC)."""
-    try:
-        CMD_STATUS = "00000000000000accf23aa3190590001e4"
-        command = bytes.fromhex(CMD_STATUS)
-        await self._send_command(command)
-        _LOGGER.debug("Status request sent to %s", self.host)
-    except Exception as err:
-        _LOGGER.error("Failed to request status: %s", err)
-
-async def async_get_status(self) -> dict[str, Any] | None:
-    """Get current status (returns last received broadcast)."""
-    if not self._last_status:
-        await self.async_request_status()
-        await asyncio.sleep(1)
-    
-    return self._last_status if self._last_status else None
-
-async def async_set_mode(
-    self,
-    mode: int,
-    fan_speed: int | None = None,
-) -> bool:
-    """Set AC mode and fan speed."""
-    try:
-        if not self._device_id:
-            _LOGGER.warning("Device ID not yet extracted, waiting for broadcast...")
-            await asyncio.sleep(2)
-            if not self._device_id:
-                _LOGGER.error("Cannot send command without Device ID")
-                return False
-        
-        self._current_mode = mode
-        if fan_speed is not None:
-            self._current_fan = fan_speed
-
-        cmd_base = f"00000000000000{self._device_id}f60001610402000080"
-        command = bytearray(bytes.fromhex(cmd_base))
-        command[17] = self._current_mode
-        command[18] = self._current_fan
-
-        _LOGGER.info("Sending mode command: mode=%d, fan=%d", self._current_mode, self._current_fan)
-        await self._send_command(bytes(command))
-        
-        await asyncio.sleep(0.5)
-        await self.async_request_status()
-        
-        return True
-    except Exception as err:
-        _LOGGER.error("Failed to set mode on %s: %s", self.host, err)
-        return False
-
-async def async_set_temperature(self, temperature: float) -> bool:
-    """Set target temperature."""
-    try:
-        if not self._device_id:
-            _LOGGER.warning("Device ID not yet extracted, waiting for broadcast...")
-            await asyncio.sleep(2)
-            if not self._device_id:
-                _LOGGER.error("Cannot send command without Device ID")
-                return False
-
-        cmd_base = f"00000000000000{self._device_id}810001610100000000"
-        command = bytearray(bytes.fromhex(cmd_base))
-        command[17] = self._current_mode
-        command[18] = self._current_fan
-        
-        temp_raw = int(temperature * 100)
-        command[20] = temp_raw & 0xFF
-        command[21] = (temp_raw >> 8) & 0xFF
-
-        _LOGGER.info("Sending temperature command: temp=%.1f°C", temperature)
-        await self._send_command(bytes(command))
-        
-        await asyncio.sleep(0.5)
-        await self.async_request_status()
-        
-        return True
-    except Exception as err:
-        _LOGGER.error("Failed to set temperature on %s: %s", self.host, err)
-        return False
-
-async def _send_command(self, command: bytes) -> None:
-    """Send UDP command with timeout handling."""
-    _LOGGER.debug("Sending %d bytes to %s:%d", len(command), self.host, UDP_SEND_PORT)
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(2)
-    try:
-        sock.sendto(command, (self.host, UDP_SEND_PORT))
-        _LOGGER.debug("Sent command successfully")
-    except socket.timeout:
-        _LOGGER.error("Timeout sending command to %s", self.host)
-        raise
-    finally:
-        sock.close()
-
-async def async_close(self) -> None:
-    """Close the connection."""
-    if self._listener_task:
-        self._listener_task.cancel()
+    async def async_request_status(self) -> None:
+        """Request status update (triggers a broadcast from the AC)."""
         try:
-            await self._listener_task
-        except asyncio.CancelledError:
-            pass
-        self._listener_task = None
+            CMD_STATUS = "00000000000000accf23aa3190590001e4"
+            command = bytes.fromhex(CMD_STATUS)
+            await self._send_command(command)
+            _LOGGER.debug("Status request sent to %s", self.host)
+        except Exception as err:
+            _LOGGER.error("Failed to request status: %s", err)
+
+    async def async_get_status(self) -> dict[str, Any] | None:
+        """Get current status (returns last received broadcast)."""
+        if not self._last_status:
+            await self.async_request_status()
+            await asyncio.sleep(1)
         
-    if self._send_sock:
-        self._send_sock.close()
-        self._send_sock = None
+        return self._last_status if self._last_status else None
+
+    async def async_set_mode(
+        self,
+        mode: int,
+        fan_speed: int | None = None,
+    ) -> bool:
+        """Set AC mode and fan speed."""
+        try:
+            if not self._device_id:
+                _LOGGER.warning("Device ID not yet extracted, waiting for broadcast...")
+                await asyncio.sleep(2)
+                if not self._device_id:
+                    _LOGGER.error("Cannot send command without Device ID")
+                    return False
+            
+            self._current_mode = mode
+            if fan_speed is not None:
+                self._current_fan = fan_speed
+
+            cmd_base = f"00000000000000{self._device_id}f60001610402000080"
+            command = bytearray(bytes.fromhex(cmd_base))
+            command[17] = self._current_mode
+            command[18] = self._current_fan
+
+            _LOGGER.info("Sending mode command: mode=%d, fan=%d", self._current_mode, self._current_fan)
+            await self._send_command(bytes(command))
+            
+            await asyncio.sleep(0.5)
+            await self.async_request_status()
+            
+            return True
+        except Exception as err:
+            _LOGGER.error("Failed to set mode on %s: %s", self.host, err)
+            return False
+
+    async def async_set_temperature(self, temperature: float) -> bool:
+        """Set target temperature."""
+        try:
+            if not self._device_id:
+                _LOGGER.warning("Device ID not yet extracted, waiting for broadcast...")
+                await asyncio.sleep(2)
+                if not self._device_id:
+                    _LOGGER.error("Cannot send command without Device ID")
+                    return False
+
+            cmd_base = f"00000000000000{self._device_id}810001610100000000"
+            command = bytearray(bytes.fromhex(cmd_base))
+            command[17] = self._current_mode
+            command[18] = self._current_fan
+            
+            temp_raw = int(temperature * 100)
+            command[20] = temp_raw & 0xFF
+            command[21] = (temp_raw >> 8) & 0xFF
+
+            _LOGGER.info("Sending temperature command: temp=%.1f°C", temperature)
+            await self._send_command(bytes(command))
+            
+            await asyncio.sleep(0.5)
+            await self.async_request_status()
+            
+            return True
+        except Exception as err:
+            _LOGGER.error("Failed to set temperature on %s: %s", self.host, err)
+            return False
+
+    async def _send_command(self, command: bytes) -> None:
+        """Send UDP command with timeout handling."""
+        _LOGGER.debug("Sending %d bytes to %s:%d", len(command), self.host, UDP_SEND_PORT)
         
-    if self._recv_sock:
-        self._recv_sock.close()
-        self._recv_sock = None
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(2)
+        try:
+            sock.sendto(command, (self.host, UDP_SEND_PORT))
+            _LOGGER.debug("Sent command successfully")
+        except socket.timeout:
+            _LOGGER.error("Timeout sending command to %s", self.host)
+            raise
+        finally:
+            sock.close()
+
+    async def async_close(self) -> None:
+        """Close the connection."""
+        if self._listener_task:
+            self._listener_task.cancel()
+            try:
+                await self._listener_task
+            except asyncio.CancelledError:
+                pass
+            self._listener_task = None
+            
+        if self._send_sock:
+            self._send_sock.close()
+            self._send_sock = None
+            
+        if self._recv_sock:
+            self._recv_sock.close()
+            self._recv_sock = None
