@@ -16,6 +16,9 @@ UPDATE_INTERVAL = 5
 # Rate limiting (packets per second)
 BROADCAST_RATE_LIMIT = 10.0
 
+# Maximum packet size (security hardening)
+MAX_PACKET_SIZE = 100
+
 # BGH Protocol Commands (hex)
 CMD_STATUS = "00000000000000accf23aa3190590001e4"
 
