@@ -12,6 +12,7 @@
     },
     "error": {
       "cannot_connect": "No se pudo conectar al equipo. Verifica la IP y que el aire esté encendido.",
+      "invalid_ip": "Formato de dirección IP inválido. Usa el formato: 192.168.1.100 (sin IPs loopback o reservadas)",
       "unknown": "Error inesperado"
     },
     "abort": {
