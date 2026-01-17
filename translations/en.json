@@ -12,6 +12,7 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to device. Check IP and ensure AC is powered on.",
+      "invalid_ip": "Invalid IP address format. Use format: 192.168.1.100 (no loopback or reserved IPs)",
       "unknown": "Unexpected error"
     },
     "abort": {
