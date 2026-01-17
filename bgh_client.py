@@ -18,6 +18,21 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Maximum packet size to prevent resource exhaustion
+MAX_PACKET_SIZE = 100
+
+
+class ClientError(Exception):
+    """Base exception for BGH client errors."""
+
+
+class ValidationError(ClientError):
+    """Data validation failed."""
+
+
+class NetworkError(ClientError):
+    """Network operation failed."""
+
 
 class TokenBucket:
     """Token bucket rate limiter for broadcast processing.
@@ -66,13 +81,13 @@ def _validate_temperature_ranges(current_temp: float, target_temp: float) -> Non
         target_temp: Target temperature in Celsius
     
     Raises:
-        ValueError: If temperatures are out of valid range
+        ValidationError: If temperatures are out of valid range
     """
     if not (0 <= current_temp <= 50):
-        raise ValueError(f"Current temperature {current_temp}°C out of range 0-50")
+        raise ValidationError(f"Current temperature {current_temp}°C out of range 0-50")
     
     if not (16 <= target_temp <= 30):
-        raise ValueError(f"Target temperature {target_temp}°C out of range 16-30")
+        raise ValidationError(f"Target temperature {target_temp}°C out of range 16-30")
 
 
 def parse_status_packet(data: bytes) -> dict[str, Any]:
@@ -85,10 +100,10 @@ def parse_status_packet(data: bytes) -> dict[str, Any]:
         Dictionary with parsed status
         
     Raises:
-        ValueError: If packet is malformed or contains invalid data
+        ValidationError: If packet is malformed or contains invalid data
     """
     if len(data) < 25:
-        raise ValueError(f"Invalid status data length: {len(data)}")
+        raise ValidationError(f"Invalid status data length: {len(data)}")
 
     mode = data[18]
     fan_speed = data[19]
@@ -117,13 +132,17 @@ class BGHClient:
         self,
         host: str,
         rate_limiter: TokenBucket | None = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         """Initialize the client.
         
         Args:
             host: IP address of AC unit (must be valid IPv4)
             rate_limiter: Optional custom rate limiter (for testing)
+            logger: Optional injected logger (for testing/observability)
         """
+        self._logger = logger or _LOGGER
+        
         # Validate IP at construction time
         try:
             ip = ipaddress.ip_address(host)
@@ -132,7 +151,7 @@ class BGHClient:
             if ip.is_reserved or ip.is_loopback or ip.is_multicast:
                 raise ValueError("IP address is reserved/loopback/multicast")
         except ValueError as err:
-            _LOGGER.error("Invalid host IP: %s", err)
+            self._logger.error("Invalid host IP: %s", err)
             raise
         
         self.host = host
@@ -148,46 +167,49 @@ class BGHClient:
             rate=BROADCAST_RATE_LIMIT,
             capacity=BROADCAST_RATE_LIMIT
         )
+        self._error_count = 0
+        self._max_errors = 10
 
     async def async_connect(self) -> bool:
         """Connect to the AC unit and start listening for broadcasts."""
         try:
-            _LOGGER.info("BGH Client connecting to %s", self.host)
+            self._logger.info("BGH Client connecting to %s", self.host)
             
             try:
                 self._recv_sock = self._create_recv_socket()
-                _LOGGER.info("Broadcast receive socket created")
+                self._logger.info("Broadcast receive socket created")
             except Exception as e:
-                _LOGGER.error("Failed to create receive socket: %s", e)
+                self._logger.error("Failed to create receive socket: %s", e)
                 return False
             
             try:
                 self._send_sock = self._create_send_socket()
-                _LOGGER.info("Send socket created")
+                self._logger.info("Send socket created (reusable)")
             except Exception as e:
-                _LOGGER.error("Failed to create send socket: %s", e)
+                self._logger.error("Failed to create send socket: %s", e)
                 if self._recv_sock:
                     self._recv_sock.close()
+                    self._recv_sock = None
                 return False
             
-            _LOGGER.info("Starting broadcast listener task...")
+            self._logger.info("Starting broadcast listener task...")
             self._listener_task = asyncio.create_task(self._broadcast_listener())
-            _LOGGER.info("BGH Client connected for %s", self.host)
+            self._logger.info("BGH Client connected for %s", self.host)
             
-            _LOGGER.info("Sending initial status request...")
+            self._logger.info("Sending initial status request...")
             await self.async_request_status()
             
             return True
         except Exception as err:
-            _LOGGER.error("Failed to connect to %s: %s", self.host, err)
+            self._logger.error("Failed to connect to %s: %s", self.host, err)
             return False
 
     def _create_send_socket(self) -> socket.socket:
-        """Create UDP send socket with timeout."""
+        """Create UDP send socket with timeout (reused for all commands)."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.settimeout(2)
-        _LOGGER.info("Send socket created with 2s timeout")
+        sock.settimeout(2.0)
+        self._logger.debug("Send socket created with 2s timeout")
         return sock
 
     def _create_recv_socket(self) -> socket.socket:
@@ -198,11 +220,23 @@ class BGHClient:
         
         sock.bind(("", UDP_RECV_PORT))
         sock.setblocking(False)
-        _LOGGER.info("Broadcast receive socket bound to port %d", UDP_RECV_PORT)
+        self._logger.debug("Broadcast receive socket bound to port %d", UDP_RECV_PORT)
         return sock
 
     def _is_valid_status_packet(self, data: bytes) -> bool:
-        """Validate if packet is a valid status broadcast (29 bytes)."""
+        """Validate if packet is a valid status broadcast.
+        
+        Args:
+            data: Raw packet data
+            
+        Returns:
+            True if valid 29-byte status packet
+        """
+        # Security: Reject oversized packets
+        if len(data) > MAX_PACKET_SIZE:
+            self._logger.warning("Rejected oversized packet: %d bytes", len(data))
+            return False
+        
         if len(data) != 29:
             return False
         
@@ -219,15 +253,15 @@ class BGHClient:
 
     async def _broadcast_listener(self) -> None:
         """Listen for UDP broadcasts from the AC unit with rate limiting."""
-        _LOGGER.info("Broadcast listener started for %s", self.host)
-        _LOGGER.info("Listening on port %d for broadcasts from %s", UDP_RECV_PORT, self.host)
+        self._logger.info("Broadcast listener started for %s", self.host)
+        self._logger.debug("Listening on port %d for broadcasts from %s", UDP_RECV_PORT, self.host)
         
         broadcast_timeout = 0
         
         while True:
             try:
                 if not self._recv_sock:
-                    _LOGGER.warning("Receive socket is None, stopping listener")
+                    self._logger.warning("Receive socket is None, stopping listener")
                     break
                     
                 loop = asyncio.get_event_loop()
@@ -238,74 +272,103 @@ class BGHClient:
                         timeout=30.0
                     )
                     
+                    # Reset error counter on successful receive
+                    self._error_count = 0
                     broadcast_timeout = 0
                     
                     if addr[0] != self.host:
                         continue
                     
-                    # Rate limiting
+                    # Rate limiting - prevent broadcast floods
                     if not self._rate_limiter.consume():
-                        _LOGGER.warning("Broadcast rate limit exceeded from %s", self.host)
+                        self._logger.warning("Broadcast rate limit exceeded from %s", self.host)
                         continue
                     
-                    _LOGGER.debug("Received UDP packet from %s: %d bytes", addr, len(data))
+                    self._logger.debug("Received UDP packet from %s: %d bytes", addr, len(data))
                     
                     # Filter packet types
                     if len(data) == 22:
-                        _LOGGER.debug("Ignoring ACK packet (22 bytes)")
+                        self._logger.debug("Ignoring ACK packet (22 bytes)")
                         continue
                     elif len(data) == 108:
-                        _LOGGER.debug("Ignoring discovery packet (108 bytes)")
+                        self._logger.debug("Ignoring discovery packet (108 bytes)")
                         continue
                     elif len(data) in (46, 47):
-                        _LOGGER.debug("Ignoring control response packet (%d bytes)", len(data))
+                        self._logger.debug("Ignoring control response packet (%d bytes)", len(data))
                         continue
                     elif len(data) != 29:
-                        _LOGGER.debug("Ignoring unknown packet (%d bytes)", len(data))
+                        self._logger.debug("Ignoring unknown packet (%d bytes)", len(data))
                         continue
                     
                     if not self._is_valid_status_packet(data):
-                        _LOGGER.warning("Invalid packet structure (29 bytes but wrong format)")
+                        self._logger.warning("Invalid packet structure (29 bytes but wrong format)")
                         continue
                     
-                    _LOGGER.info("Valid status broadcast from %s: 29 bytes", addr)
+                    self._logger.info("Valid status broadcast from %s: 29 bytes", addr)
                     
+                    # Extract device ID on first valid packet
                     if not self._device_id:
-                        self._device_id = data[1:7].hex()
-                        _LOGGER.info("Device ID extracted: %s", self._device_id)
+                        new_device_id = data[1:7].hex()
+                        self._device_id = new_device_id
+                        self._logger.info("Device ID extracted: %s", self._device_id)
+                    else:
+                        # Security: Log if device ID changes (potential spoofing)
+                        packet_device_id = data[1:7].hex()
+                        if packet_device_id != self._device_id:
+                            self._logger.warning(
+                                "Device ID mismatch: expected=%s, got=%s (possible spoofing)",
+                                self._device_id,
+                                packet_device_id
+                            )
+                            continue
                     
                     try:
                         status = parse_status_packet(data)
                         self._last_status = status
                         self._current_mode = status.get("mode_raw", 0)
                         self._current_fan = status.get("fan_speed", 1)
-                        _LOGGER.info("Parsed: mode=%s, fan=%s, temp=%.1f°C, target=%.1f°C", 
-                                   status.get('mode'), 
-                                   status.get('fan_speed'), 
-                                   status.get('current_temperature', 0),
-                                   status.get('target_temperature', 0))
+                        self._logger.info("Parsed: mode=%s, fan=%s, temp=%.1f°C, target=%.1f°C", 
+                                       status.get('mode'), 
+                                       status.get('fan_speed'), 
+                                       status.get('current_temperature', 0),
+                                       status.get('target_temperature', 0))
                         if self._status_callback:
                             self._status_callback(status)
-                    except ValueError as err:
-                        _LOGGER.warning("Failed to parse status packet: %s", err)
+                    except ValidationError as err:
+                        self._logger.warning("Failed to parse status packet: %s", err)
                         continue
                         
                 except asyncio.TimeoutError:
                     broadcast_timeout += 1
                     
                     if broadcast_timeout == 1:
-                        _LOGGER.warning("No broadcasts received from %s", self.host)
-                        _LOGGER.info("Switching to polling mode...")
+                        self._logger.warning("No broadcasts received from %s", self.host)
+                        self._logger.info("Switching to polling mode...")
                     
-                    _LOGGER.debug("Polling: Requesting status from %s", self.host)
+                    self._logger.debug("Polling: Requesting status from %s", self.host)
                     await self.async_request_status()
                     await asyncio.sleep(2)
                             
             except asyncio.CancelledError:
-                _LOGGER.info("Broadcast listener stopped for %s", self.host)
+                self._logger.info("Broadcast listener stopped for %s", self.host)
                 break
             except Exception as err:
-                _LOGGER.error("Error in broadcast listener: %s", err)
+                self._error_count += 1
+                self._logger.error(
+                    "Error in broadcast listener (%d/%d): %s",
+                    self._error_count,
+                    self._max_errors,
+                    err
+                )
+                
+                # Fail-fast after max errors to prevent resource leak
+                if self._error_count >= self._max_errors:
+                    self._logger.error(
+                        "Max error count reached (%d), stopping listener",
+                        self._max_errors
+                    )
+                    break
+                
                 await asyncio.sleep(1)
 
     async def async_request_status(self) -> None:
@@ -314,9 +377,9 @@ class BGHClient:
             CMD_STATUS = "00000000000000accf23aa3190590001e4"
             command = bytes.fromhex(CMD_STATUS)
             await self._send_command(command)
-            _LOGGER.debug("Status request sent to %s", self.host)
+            self._logger.debug("Status request sent to %s", self.host)
         except Exception as err:
-            _LOGGER.error("Failed to request status: %s", err)
+            self._logger.error("Failed to request status: %s", err)
 
     async def async_get_status(self) -> dict[str, Any] | None:
         """Get current status (returns last received broadcast)."""
@@ -334,10 +397,10 @@ class BGHClient:
         """Set AC mode and fan speed."""
         try:
             if not self._device_id:
-                _LOGGER.warning("Device ID not yet extracted, waiting for broadcast...")
+                self._logger.warning("Device ID not yet extracted, waiting for broadcast...")
                 await asyncio.sleep(2)
                 if not self._device_id:
-                    _LOGGER.error("Cannot send command without Device ID")
+                    self._logger.error("Cannot send command without Device ID")
                     return False
             
             self._current_mode = mode
@@ -349,7 +412,7 @@ class BGHClient:
             command[17] = self._current_mode
             command[18] = self._current_fan
 
-            _LOGGER.info("Sending mode command: mode=%d, fan=%d", self._current_mode, self._current_fan)
+            self._logger.info("Sending mode command: mode=%d, fan=%d", self._current_mode, self._current_fan)
             await self._send_command(bytes(command))
             
             await asyncio.sleep(0.5)
@@ -357,17 +420,17 @@ class BGHClient:
             
             return True
         except Exception as err:
-            _LOGGER.error("Failed to set mode on %s: %s", self.host, err)
+            self._logger.error("Failed to set mode on %s: %s", self.host, err)
             return False
 
     async def async_set_temperature(self, temperature: float) -> bool:
         """Set target temperature."""
         try:
             if not self._device_id:
-                _LOGGER.warning("Device ID not yet extracted, waiting for broadcast...")
+                self._logger.warning("Device ID not yet extracted, waiting for broadcast...")
                 await asyncio.sleep(2)
                 if not self._device_id:
-                    _LOGGER.error("Cannot send command without Device ID")
+                    self._logger.error("Cannot send command without Device ID")
                     return False
 
             cmd_base = f"00000000000000{self._device_id}810001610100000000"
@@ -379,7 +442,7 @@ class BGHClient:
             command[20] = temp_raw & 0xFF
             command[21] = (temp_raw >> 8) & 0xFF
 
-            _LOGGER.info("Sending temperature command: temp=%.1f°C", temperature)
+            self._logger.info("Sending temperature command: temp=%.1f°C", temperature)
             await self._send_command(bytes(command))
             
             await asyncio.sleep(0.5)
@@ -387,26 +450,37 @@ class BGHClient:
             
             return True
         except Exception as err:
-            _LOGGER.error("Failed to set temperature on %s: %s", self.host, err)
+            self._logger.error("Failed to set temperature on %s: %s", self.host, err)
             return False
 
     async def _send_command(self, command: bytes) -> None:
-        """Send UDP command with timeout handling."""
-        _LOGGER.debug("Sending %d bytes to %s:%d", len(command), self.host, UDP_SEND_PORT)
+        """Send UDP command using reusable socket.
         
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(2)
+        Args:
+            command: Command bytes to send
+            
+        Raises:
+            NetworkError: If send fails
+        """
+        if not self._send_sock:
+            raise NetworkError("Send socket not initialized")
+        
+        self._logger.debug("Sending %d bytes to %s:%d", len(command), self.host, UDP_SEND_PORT)
+        
         try:
-            sock.sendto(command, (self.host, UDP_SEND_PORT))
-            _LOGGER.debug("Sent command successfully")
+            self._send_sock.sendto(command, (self.host, UDP_SEND_PORT))
+            self._logger.debug("Sent command successfully")
         except socket.timeout:
-            _LOGGER.error("Timeout sending command to %s", self.host)
-            raise
-        finally:
-            sock.close()
+            self._logger.error("Timeout sending command to %s", self.host)
+            raise NetworkError(f"Timeout sending to {self.host}") from None
+        except OSError as err:
+            self._logger.error("Socket error sending command: %s", err)
+            raise NetworkError(f"Socket error: {err}") from err
 
     async def async_close(self) -> None:
-        """Close the connection."""
+        """Close the connection and cleanup resources."""
+        self._logger.info("Closing BGH client for %s", self.host)
+        
         if self._listener_task:
             self._listener_task.cancel()
             try:
@@ -418,7 +492,9 @@ class BGHClient:
         if self._send_sock:
             self._send_sock.close()
             self._send_sock = None
+            self._logger.debug("Send socket closed")
             
         if self._recv_sock:
             self._recv_sock.close()
             self._recv_sock = None
+            self._logger.debug("Receive socket closed")
