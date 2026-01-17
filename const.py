@@ -9,15 +9,15 @@ CONF_NAME = "name"
 # UDP Ports
 UDP_SEND_PORT = 20910
 UDP_RECV_PORT = 20911
-UDP_SOURCE_PORT = 54563  # Puerto origen requerido por protocolo BGH
 
 # Update interval (seconds) - Backup polling when broadcasts don't work
-# The broadcast listener will handle most updates in real-time
 UPDATE_INTERVAL = 5
+
+# Rate limiting (packets per second)
+BROADCAST_RATE_LIMIT = 10.0
 
 # BGH Protocol Commands (hex)
 CMD_STATUS = "00000000000000accf23aa3190590001e4"
-# CMD_CONTROL se construye dinámicamente con el Device ID del aire
 
 # Mode mapping
 MODE_OFF = 0
