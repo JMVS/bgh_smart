@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from .const import (
     BROADCAST_RATE_LIMIT,
-    MAX_PACKET_SIZE,  # ← Agregar esta línea
+    MAX_PACKET_SIZE,
     MODES,
     UDP_RECV_PORT,
     UDP_SEND_PORT,
